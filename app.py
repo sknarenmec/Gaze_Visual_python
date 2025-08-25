@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
+import matplotlib.pyplot as plt
 from datetime import datetime
 import json
 import time
@@ -72,20 +71,28 @@ st.markdown("""
         100% { opacity: 1; }
     }
     
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    .calibration-point {
+        display: inline-block;
+        width: 30px;
+        height: 30px;
+        background: #ef4444;
+        border: 3px solid white;
+        border-radius: 50%;
+        margin: 5px;
         text-align: center;
-        border-left: 4px solid #3b82f6;
+        line-height: 24px;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
     }
     
-    .calibration-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-        margin: 2rem 0;
+    .point-completed {
+        background: #22c55e !important;
+    }
+    
+    .point-current {
+        background: #f59e0b !important;
+        animation: pulse 1s infinite;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -199,9 +206,8 @@ def display_calibration_interface():
     if st.session_state.current_point == 0 and not st.session_state.is_calibrated:
         st.info("👆 Start calibration to see clickable calibration points")
         
-        # Show calibration point layout preview
-        fig = create_calibration_preview()
-        st.plotly_chart(fig, use_container_width=True)
+        # Show calibration point layout preview using matplotlib
+        create_calibration_preview()
     
     elif st.session_state.current_point > 0 and not st.session_state.is_calibrated:
         display_active_calibration()
@@ -211,37 +217,50 @@ def display_calibration_interface():
         
         # Show calibration results
         if st.session_state.calibration_data:
-            fig = create_calibration_results()
-            st.plotly_chart(fig, use_container_width=True)
+            create_calibration_results()
 
 def create_calibration_preview():
-    """Create a preview of calibration point positions"""
-    fig = go.Figure()
+    """Create a preview of calibration point positions using matplotlib"""
+    fig, ax = plt.subplots(figsize=(10, 6))
     
-    for point in CALIBRATION_POINTS:
-        fig.add_trace(go.Scatter(
-            x=[point["x"]],
-            y=[100 - point["y"]],  # Flip Y axis for display
-            mode='markers+text',
-            marker=dict(size=20, color='red', symbol='circle'),
-            text=[f"P{point['id']}"],
-            textposition="middle center",
-            textfont=dict(color='white', size=10),
-            name=point["name"],
-            hovertemplate=f"<b>{point['name']}</b><br>Position: ({point['x']}%, {point['y']}%)<extra></extra>"
-        ))
+    # Plot all calibration points
+    for i, point in enumerate(CALIBRATION_POINTS):
+        x = point["x"]
+        y = 100 - point["y"]  # Flip Y axis for display
+        
+        # Color based on completion status
+        if i < st.session_state.current_point - 1:
+            color = 'green'
+            marker = 'o'
+        elif i == st.session_state.current_point - 1:
+            color = 'orange'
+            marker = 's'
+        else:
+            color = 'red'
+            marker = 'o'
+        
+        ax.scatter(x, y, c=color, s=200, marker=marker, alpha=0.7)
+        ax.annotate(f'P{point["id"]}', (x, y), ha='center', va='center', 
+                   fontweight='bold', color='white', fontsize=8)
     
-    fig.update_layout(
-        title="Calibration Point Layout Preview",
-        xaxis_title="Screen Width (%)",
-        yaxis_title="Screen Height (%)",
-        xaxis=dict(range=[0, 100], showgrid=True),
-        yaxis=dict(range=[0, 100], showgrid=True),
-        showlegend=False,
-        height=400
-    )
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    ax.set_xlabel('Screen Width (%)')
+    ax.set_ylabel('Screen Height (%)')
+    ax.set_title('Calibration Point Layout')
+    ax.grid(True, alpha=0.3)
     
-    return fig
+    # Add legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='red', label='Not Started'),
+        Patch(facecolor='orange', label='Current'),
+        Patch(facecolor='green', label='Completed')
+    ]
+    ax.legend(handles=legend_elements, loc='upper right')
+    
+    st.pyplot(fig)
+    plt.close()
 
 def display_active_calibration():
     """Display active calibration interface"""
@@ -249,6 +268,21 @@ def display_active_calibration():
     
     st.write(f"**Current Point:** {current_point_data['name']}")
     st.write(f"**Position:** {current_point_data['x']}% x {current_point_data['y']}%")
+    
+    # Show visual progress
+    progress_html = ""
+    for i, point in enumerate(CALIBRATION_POINTS):
+        if i < st.session_state.current_point - 1:
+            css_class = "calibration-point point-completed"
+        elif i == st.session_state.current_point - 1:
+            css_class = "calibration-point point-current"
+        else:
+            css_class = "calibration-point"
+        
+        progress_html += f'<span class="{css_class}">{point["id"]}</span>'
+    
+    st.markdown(f"<div style='text-align: center; margin: 20px 0;'>{progress_html}</div>", 
+               unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     
@@ -290,54 +324,37 @@ def record_calibration_point(point_data):
     st.rerun()
 
 def create_calibration_results():
-    """Create visualization of calibration results"""
+    """Create visualization of calibration results using matplotlib"""
     df = pd.DataFrame(st.session_state.calibration_data)
     
-    fig = go.Figure()
+    fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Target points
-    fig.add_trace(go.Scatter(
-        x=df['target_x'],
-        y=100 - df['target_y'],  # Flip Y axis
-        mode='markers',
-        marker=dict(size=15, color='red', symbol='x'),
-        name='Target Points',
-        hovertemplate="<b>Target</b><br>X: %{x}%<br>Y: %{customdata}%<extra></extra>",
-        customdata=df['target_y']
-    ))
+    # Plot target points
+    ax.scatter(df['target_x'], 100 - df['target_y'], 
+              c='red', s=150, marker='x', linewidths=3, 
+              label='Target Points', alpha=0.8)
     
-    # Gaze points
-    fig.add_trace(go.Scatter(
-        x=df['gaze_x'],
-        y=100 - df['gaze_y'],  # Flip Y axis
-        mode='markers',
-        marker=dict(size=10, color='blue', symbol='circle'),
-        name='Gaze Points',
-        hovertemplate="<b>Gaze</b><br>X: %{x:.1f}%<br>Y: %{customdata:.1f}%<extra></extra>",
-        customdata=df['gaze_y']
-    ))
+    # Plot gaze points
+    ax.scatter(df['gaze_x'], 100 - df['gaze_y'], 
+              c='blue', s=100, marker='o', 
+              label='Gaze Points', alpha=0.6)
     
-    # Connect corresponding points
+    # Draw lines connecting target to gaze points
     for i in range(len(df)):
-        fig.add_trace(go.Scatter(
-            x=[df.iloc[i]['target_x'], df.iloc[i]['gaze_x']],
-            y=[100 - df.iloc[i]['target_y'], 100 - df.iloc[i]['gaze_y']],
-            mode='lines',
-            line=dict(color='gray', width=1, dash='dot'),
-            showlegend=False,
-            hoverinfo='skip'
-        ))
+        ax.plot([df.iloc[i]['target_x'], df.iloc[i]['gaze_x']], 
+               [100 - df.iloc[i]['target_y'], 100 - df.iloc[i]['gaze_y']], 
+               'gray', linestyle='--', alpha=0.5, linewidth=1)
     
-    fig.update_layout(
-        title="Calibration Results: Target vs Gaze Points",
-        xaxis_title="Screen Width (%)",
-        yaxis_title="Screen Height (%)",
-        xaxis=dict(range=[0, 100]),
-        yaxis=dict(range=[0, 100]),
-        height=400
-    )
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    ax.set_xlabel('Screen Width (%)')
+    ax.set_ylabel('Screen Height (%)')
+    ax.set_title('Calibration Results: Target vs Gaze Points')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     
-    return fig
+    st.pyplot(fig)
+    plt.close()
 
 def display_statistics():
     """Display calibration and gaze statistics"""
